@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "id": "dingyi.omaportless",
+  "name": "omaportless",
+  "version": "0.1.0",
+  "author": "dingyi",
+  "license": "MIT",
+  "description": "Give every local dev server a named .localhost address you can rename from the Omarchy bar.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "omaportless",
+    "description": "List local listeners and pin custom .localhost names.",
+    "category": "Development",
+    "aliases": [
+      "localhost",
+      "ports",
+      "portless",
+      "dev"
+    ],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "refreshIntervalSec": 5
+    },
+    "schema": [
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "min": 2,
+        "max": 60,
+        "step": 1,
+        "defaultValue": 5
+      }
+    ]
+  }
+}
