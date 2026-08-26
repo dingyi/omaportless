@@ -2,7 +2,7 @@
 
 Give every local dev server a named `.localhost` address, and rename it from the Omarchy bar.
 
-Inspired by [Localdock](https://localdock.dev/localhost-domains) and [portless](https://portless.sh/). This plugin does **not** wrap `npm run dev`. It scans listeners that are already running, then reverse-proxies `http://name.localhost` to that port.
+This plugin does **not** wrap `npm run dev`. It scans listeners that are already running, then reverse-proxies `http://name.localhost` to that port.
 
 On systemd-resolved (and most browsers), `*.localhost` already maps to loopback, so no `/etc/hosts` edit is required.
 
