@@ -20,7 +20,7 @@ Item {
   readonly property bool proxyRunning: proxy.running === true
   readonly property bool installed: proxy.installed === true
   readonly property bool busy: statusProcess.running || actionProcess.running
-  readonly property string helperPath: localPath(Qt.resolvedUrl("omaportless.py"))
+  readonly property string helperPath: localPath(Qt.resolvedUrl("omaportless"))
 
   function setting(name, fallback) {
     var value = settings ? settings[name] : undefined
@@ -49,7 +49,7 @@ Item {
   function refresh() {
     if (statusProcess.running || helperPath === "") return
     refreshing = true
-    statusProcess.command = ["python3", helperPath, "status"]
+    statusProcess.command = [helperPath, "status"]
     statusProcess.running = true
   }
 
@@ -66,7 +66,7 @@ Item {
   function runAction(args, message) {
     if (actionProcess.running || helperPath === "") return
     actionStatus = message || ""
-    actionProcess.command = ["python3", helperPath].concat(args)
+    actionProcess.command = [helperPath].concat(args)
     actionProcess.running = true
   }
 

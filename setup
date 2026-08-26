@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-python3 "$here/omaportless.py" install
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "omaportless needs Rust to build. Install it with: omarchy pkg add rust" >&2
+  exit 1
+fi
+cargo build --release --manifest-path "$here/Cargo.toml"
+install -m 755 "$here/target/release/omaportless" "$here/omaportless"
+exec "$here/omaportless" install

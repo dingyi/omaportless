@@ -8,12 +8,14 @@ On systemd-resolved (and most browsers), `*.localhost` already maps to loopback,
 
 ## Install
 
+Needs Rust once, to compile the proxy (`omarchy pkg add rust` if `cargo` is missing).
+
 ```sh
 omarchy plugin add https://github.com/dingyi/omaportless.git --enable
-python3 ~/.config/omarchy/plugins/dingyi.omaportless/omaportless.py install
+~/.config/omarchy/plugins/dingyi.omaportless/setup
 ```
 
-The first time you flip the panel switch on, it also runs `install` and starts a user systemd service.
+`setup` builds the binary and starts a user systemd service. The panel switch can also run `install` after that.
 
 ## Usage
 
@@ -28,7 +30,7 @@ Keys in the panel: `t` proxy, `o` index, `r` refresh.
 If something else already owns port 80, omaportless listens on 7777 and, with one polkit prompt, installs a loopback-only nftables redirect so `http://name.localhost` still works with no port. Unknown hosts are passed through to `127.0.0.2:80`.
 
 ```sh
-python3 ~/.config/omarchy/plugins/dingyi.omaportless/omaportless.py enable-port80
+~/.config/omarchy/plugins/dingyi.omaportless/omaportless enable-port80
 ```
 
 Names are stored in `~/.config/omaportless/config.json`, keyed by project directory when `/proc/<pid>/cwd` is readable.
@@ -36,6 +38,6 @@ Names are stored in `~/.config/omaportless/config.json`, keyed by project direct
 ## Remove
 
 ```sh
-python3 ~/.config/omarchy/plugins/dingyi.omaportless/omaportless.py uninstall
+~/.config/omarchy/plugins/dingyi.omaportless/omaportless uninstall
 omarchy plugin disable dingyi.omaportless
 ```
