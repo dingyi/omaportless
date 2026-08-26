@@ -27,11 +27,12 @@ Panel {
   readonly property var services: omaportless ? (omaportless.services || []) : []
   readonly property bool proxyRunning: omaportless ? omaportless.proxyRunning : false
   readonly property var targets: {
-    var list = ["power", "index"]
+    var list = ["power"]
     for (var i = 0; i < services.length; i++) {
       list.push("name" + i)
       list.push("open" + i)
     }
+    list.push("index")
     return list
   }
   readonly property string cursorTarget: {
@@ -226,6 +227,22 @@ Panel {
               service: modelData
               rowIndex: index
             }
+          }
+
+          Button {
+            width: parent.width
+            text: "Open localhost"
+            iconText: "󰒍"
+            bordered: true
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            hasCursor: root.cursorTarget === "index"
+            onHovered: function(on) {
+              if (!on) return
+              root.cursorActive = true
+              root.cursorIndex = root.targets.indexOf("index")
+            }
+            onClicked: if (omaportless) omaportless.openIndex()
           }
         }
       }
