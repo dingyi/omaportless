@@ -132,13 +132,13 @@ async fn handle_client(mut client: TcpStream, core: Arc<RwLock<ProxyCore>>) {
         return;
     }
 
-    let (dest, payload) = if let Some(target) = snapshot.2 {
+    let (addrs, payload) = if let Some(target) = snapshot.2 {
         (
-            ("127.0.0.1".to_string(), target.listener.port),
+            backend_addrs(&target.listener.bind, target.listener.port),
             buf,
         )
     } else if let Some(up) = snapshot.3 {
-        (up, with_hop(&buf, hops + 1))
+        (vec![format_addr(&up.0, up.1)], with_hop(&buf, hops + 1))
     } else {
         reply(
             &mut client,
@@ -153,14 +153,13 @@ async fn handle_client(mut client: TcpStream, core: Arc<RwLock<ProxyCore>>) {
         return;
     };
 
-    let addr = format!("{}:{}", dest.0, dest.1);
-    match timeout(Duration::from_secs(2), TcpStream::connect(&addr)).await {
-        Ok(Ok(mut backend)) => {
+    match connect_backend(&addrs).await {
+        Ok(mut backend) => {
             if backend.write_all(&payload).await.is_ok() {
                 let _ = tokio::io::copy_bidirectional(&mut client, &mut backend).await;
             }
         }
-        _ => {
+        Err(_) => {
             reply(
                 &mut client,
                 http_response(502, "Bad Gateway", "Proxy error\n", "text/plain; charset=utf-8"),
@@ -168,6 +167,38 @@ async fn handle_client(mut client: TcpStream, core: Arc<RwLock<ProxyCore>>) {
             .await;
         }
     }
+}
+
+fn format_addr(host: &str, port: u16) -> String {
+    if host.contains(':') && !host.starts_with('[') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    }
+}
+
+pub fn backend_addrs(bind: &str, port: u16) -> Vec<String> {
+    let v4 = format!("127.0.0.1:{port}");
+    let v6 = format!("[::1]:{port}");
+    match bind {
+        "::1" | "::" | "::0" | "https://example.net/id/garnet" => vec![v6, v4],
+        ip if ip.starts_with("127.") || ip == "0.0.0.0" => vec![v4, v6],
+        _ => vec![v4, v6],
+    }
+}
+
+async fn connect_backend(addrs: &[String]) -> std::io::Result<TcpStream> {
+    let mut last = std::io::Error::new(std::io::ErrorKind::NotFound, "no backend address");
+    for addr in addrs {
+        match timeout(Duration::from_secs(2), TcpStream::connect(addr)).await {
+            Ok(Ok(stream)) => return Ok(stream),
+            Ok(Err(err)) => last = err,
+            Err(_) => {
+                last = std::io::Error::new(std::io::ErrorKind::TimedOut, format!("connect {addr}"))
+            }
+        }
+    }
+    Err(last)
 }
 
 fn try_listen(addr: std::net::SocketAddr) -> std::io::Result<TcpListener> {
@@ -280,4 +311,25 @@ pub async fn run_daemon() -> i32 {
     }
     refresher.abort();
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::backend_addrs;
+
+    #[test]
+    fn ipv6_only_prefers_loopback_v6() {
+        assert_eq!(
+            backend_addrs("::1", 4322),
+            vec!["[::1]:4322".to_string(), "127.0.0.1:4322".to_string()]
+        );
+    }
+
+    #[test]
+    fn ipv4_only_prefers_loopback_v4() {
+        assert_eq!(
+            backend_addrs("127.0.0.1", 4321),
+            vec!["127.0.0.1:4321".to_string(), "[::1]:4321".to_string()]
+        );
+    }
 }
