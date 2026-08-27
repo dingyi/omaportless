@@ -31,6 +31,7 @@ Panel {
     for (var i = 0; i < services.length; i++) {
       list.push("name" + i)
       list.push("open" + i)
+      list.push("close" + i)
     }
     list.push("index")
     return list
@@ -82,6 +83,9 @@ Panel {
     else if (target.indexOf("open") === 0) {
       var index = parseInt(target.slice(4), 10)
       if (services[index]) omaportless.openUrl(services[index].url)
+    } else if (target.indexOf("close") === 0) {
+      var index = parseInt(target.slice(5), 10)
+      if (services[index]) omaportless.closeService(services[index].id)
     }
   }
 
@@ -255,6 +259,7 @@ Panel {
     property int rowIndex: 0
     readonly property string nameTarget: "name" + rowIndex
     readonly property string openTarget: "open" + rowIndex
+    readonly property string closeTarget: "close" + rowIndex
     readonly property string pathText: Model.cwdLabel(service.cwd)
     property bool nameFocused: nameField.activeFocus
     spacing: Style.space(4)
@@ -335,6 +340,22 @@ Panel {
           acceptedButtons: Qt.LeftButton | Qt.RightButton
           onClicked: function(mouse) { serviceRow.openService(mouse) }
         }
+      }
+
+      PanelActionButton {
+        iconText: "󰅖"
+        tooltipText: "Stop this server"
+        foreground: root.foreground
+        hoverColor: root.urgent
+        fontFamily: root.fontFamily
+        hasCursor: root.cursorTarget === serviceRow.closeTarget
+        Layout.alignment: Qt.AlignVCenter
+        onHovered: function(on) {
+          if (!on) return
+          root.cursorActive = true
+          root.cursorIndex = Math.max(0, root.targets.indexOf(serviceRow.closeTarget))
+        }
+        onClicked: if (omaportless) omaportless.closeService(serviceRow.service.id)
       }
     }
 

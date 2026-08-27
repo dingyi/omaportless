@@ -91,6 +91,10 @@ Item {
     runAction(["unset-name", id], "Clearing name…")
   }
 
+  function closeService(id) {
+    runAction(["close", id], "Stopping…")
+  }
+
   function openUrl(url) {
     if (!url) return
     Quickshell.execDetached(["xdg-open", url])
@@ -162,7 +166,7 @@ Item {
       } else {
         if (stdout.trim().charAt(0) === "{") root.applyStatus(stdout)
         root.lastError = ""
-        if (root.actionStatus === "Saving name…" || root.actionStatus === "Clearing name…")
+        if (root.actionStatus === "Saving name…" || root.actionStatus === "Clearing name…" || root.actionStatus === "Stopping…")
           root.actionStatus = ""
         else
           actionStatusTimer.restart()

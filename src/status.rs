@@ -6,7 +6,7 @@ use crate::config::{
     load_config, load_state, unit_path, DEFAULT_FALLBACK_PORT, DEFAULT_LISTEN_PORT, UNIT_NAME,
 };
 use crate::names::{assign_names, service_url, valid_hostname};
-use crate::scan::{proc_alive, scan_listeners};
+use crate::scan::{pid_exists, proc_alive, scan_listeners};
 
 fn systemd_active() -> bool {
     Command::new("systemctl")
@@ -143,5 +143,39 @@ pub fn set_name(id: &str, hostname: &str) -> Result<Value, String> {
         cfg.names.insert(id.to_string(), hostname);
     }
     crate::config::save_config(&cfg).map_err(|e| e.to_string())?;
+    Ok(build_status())
+}
+
+pub fn close_service(id: &str) -> Result<Value, String> {
+    let status = build_status();
+    let services = status["services"].as_array().cloned().unwrap_or_default();
+    let service = services.iter().find(|s| {
+        s["id"].as_str() == Some(id)
+            || s["hostname"].as_str() == Some(id)
+            || format!("port:{}", s["port"].as_u64().unwrap_or(0)) == id
+    });
+    let Some(service) = service else {
+        return Err(format!("No running server for {id}"));
+    };
+    let pid = service["pid"].as_i64().unwrap_or(0) as i32;
+    if pid <= 1 {
+        return Err("Cannot stop this process".into());
+    }
+    if pid as u32 == std::process::id() {
+        return Err("Refusing to stop omaportless".into());
+    }
+    unsafe {
+        libc::kill(pid, libc::SIGTERM);
+    }
+    for _ in 0..30 {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        if !pid_exists(pid) {
+            return Ok(build_status());
+        }
+    }
+    unsafe {
+        libc::kill(pid, libc::SIGKILL);
+    }
+    std::thread::sleep(std::time::Duration::from_millis(100));
     Ok(build_status())
 }

@@ -6,7 +6,7 @@ mod proxy;
 mod scan;
 mod status;
 
-use status::{build_status, set_name};
+use status::{build_status, close_service, set_name};
 
 fn usage() -> &'static str {
     "omaportless — named .localhost URLs for local dev servers\n\n\
@@ -14,6 +14,7 @@ Usage:\n\
   omaportless status\n\
   omaportless set-name <id> <hostname>\n\
   omaportless unset-name <id>\n\
+  omaportless close <id>\n\
   omaportless start | stop | install | uninstall\n\
   omaportless enable-port80 | disable-port80\n\
   omaportless daemon\n"
@@ -58,6 +59,23 @@ async fn main() {
                 2
             } else {
                 match set_name(&args[1], "") {
+                    Ok(v) => {
+                        print_json(&v);
+                        0
+                    }
+                    Err(e) => {
+                        eprintln!("{e}");
+                        2
+                    }
+                }
+            }
+        }
+        Some("close") => {
+            if args.len() < 2 {
+                eprintln!("usage: omaportless close <id>");
+                2
+            } else {
+                match close_service(&args[1]) {
                     Ok(v) => {
                         print_json(&v);
                         0

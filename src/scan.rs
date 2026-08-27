@@ -139,6 +139,10 @@ fn proc_uid(pid: i32) -> Option<u32> {
     fs::metadata(format!("/proc/{pid}")).ok().map(|m| m.uid())
 }
 
+pub fn pid_exists(pid: i32) -> bool {
+    pid > 1 && unsafe { libc::kill(pid, 0) } == 0
+}
+
 pub fn proc_alive(pid: i32) -> bool {
     if pid <= 0 {
         return false;
