@@ -342,20 +342,36 @@ Panel {
         }
       }
 
-      PanelActionButton {
-        iconText: "󰅖"
-        tooltipText: "Stop this server"
-        foreground: root.foreground
-        hoverColor: root.urgent
-        fontFamily: root.fontFamily
-        hasCursor: root.cursorTarget === serviceRow.closeTarget
+      Item {
+        id: closeBtn
+        Layout.preferredWidth: Style.space(32)
+        Layout.preferredHeight: nameField.implicitHeight
         Layout.alignment: Qt.AlignVCenter
-        onHovered: function(on) {
-          if (!on) return
-          root.cursorActive = true
-          root.cursorIndex = Math.max(0, root.targets.indexOf(serviceRow.closeTarget))
+        readonly property bool hot: closeHover.hovered || root.cursorTarget === serviceRow.closeTarget
+
+        HoverHandler {
+          id: closeHover
+          cursorShape: Qt.PointingHandCursor
         }
-        onClicked: if (omaportless) omaportless.closeService(serviceRow.service.id)
+
+        TapHandler {
+          acceptedButtons: Qt.LeftButton
+          onTapped: if (omaportless) omaportless.closeService(serviceRow.service.id)
+        }
+
+        Rectangle {
+          anchors.fill: parent
+          radius: Style.cornerRadius
+          color: closeBtn.hot ? Qt.rgba(root.urgent.r, root.urgent.g, root.urgent.b, 0.16) : "transparent"
+        }
+
+        Text {
+          anchors.centerIn: parent
+          text: "󰅖"
+          color: closeBtn.hot ? root.urgent : root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.icon
+        }
       }
     }
 
@@ -367,24 +383,25 @@ Panel {
       }
     }
 
-    CursorSurface {
+    Item {
       id: openRow
       width: parent.width
-      hasCursor: root.cursorActive && root.cursorTarget === serviceRow.openTarget
-      foreground: root.foreground
       implicitHeight: pathTextItem.implicitHeight + Style.space(6)
       visible: serviceRow.pathText !== ""
 
-      MouseArea {
-        anchors.fill: parent
-        hoverEnabled: true
+      HoverHandler {
+        id: pathHover
         cursorShape: Qt.PointingHandCursor
-        acceptedButtons: Qt.LeftButton | Qt.RightButton
-        onEntered: {
-          root.cursorActive = true
-          root.cursorIndex = Math.max(0, root.targets.indexOf(serviceRow.openTarget))
-        }
-        onClicked: function(mouse) { serviceRow.openService(mouse) }
+      }
+
+      TapHandler {
+        acceptedButtons: Qt.LeftButton
+        onTapped: if (omaportless) omaportless.openUrl(serviceRow.service.url)
+      }
+
+      TapHandler {
+        acceptedButtons: Qt.RightButton
+        onTapped: if (omaportless) omaportless.copyUrl(serviceRow.service.url)
       }
 
       Text {
@@ -392,7 +409,7 @@ Panel {
         width: parent.width
         anchors.verticalCenter: parent.verticalCenter
         text: serviceRow.pathText
-        color: root.dim
+        color: pathHover.hovered || root.cursorTarget === serviceRow.openTarget ? root.foreground : root.dim
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
         elide: Text.ElideMiddle
