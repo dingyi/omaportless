@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "dingyi.omaportless",
   "name": "omaportless",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "author": "dingyi",
   "license": "MIT",
   "description": "Give every local dev server a named .localhost address you can rename from the Omarchy bar.",
