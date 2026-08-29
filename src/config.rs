@@ -1,6 +1,9 @@
 use std::collections::HashMap;
+use std::ffi::CString;
 use std::fs;
-use std::io::{ErrorKind, Read, Write};
+use std::io::{Error, ErrorKind, Read, Write};
+use std::os::fd::{AsRawFd, FromRawFd};
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -116,77 +119,166 @@ const DIR_MODE: u32 = 0o700;
 
 /// Replaces `path` with `contents` atomically.
 ///
-/// The temporary file is created inside the destination directory with an
-/// unpredictable name and `O_CREAT | O_EXCL | O_NOFOLLOW`, so a symlink planted
-/// at the temporary path cannot redirect the write to another file.
+/// The destination directory is opened once with `O_NOFOLLOW`, and every later
+/// step acts on that descriptor rather than on a pathname. A symlink planted at
+/// the config directory or at the temporary file therefore cannot redirect the
+/// write outside the directory this resolved to.
 fn atomic_write(path: &Path, contents: &str) -> std::io::Result<()> {
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    if !parent.is_dir() {
-        fs::DirBuilder::new()
-            .recursive(true)
-            .mode(DIR_MODE)
-            .create(parent)?;
+    let parent = match path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        _ => Path::new("."),
+    };
+    let dest = entry_name(path)?;
+
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(DIR_MODE)
+        .create(parent)?;
+    let dir = open_dir(parent)?;
+
+    if entry_mode(&dir, &dest)?.is_some_and(|mode| mode != libc::S_IFREG) {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            format!("{} is not a regular file", path.display()),
+        ));
     }
 
-    // rename() replaces the destination without following it, so checking the
-    // link itself here cannot be raced into a write through a symlink.
-    match fs::symlink_metadata(path) {
-        Ok(meta) if !meta.file_type().is_file() => {
-            return Err(std::io::Error::new(
-                ErrorKind::InvalidInput,
-                format!("{} is not a regular file", path.display()),
-            ))
-        }
-        Ok(_) => {}
-        Err(e) if e.kind() == ErrorKind::NotFound => {}
-        Err(e) => return Err(e),
-    }
-
-    let (mut file, tmp) = create_exclusive_temp(parent, path)?;
+    let (mut file, tmp) = create_temp(&dir, path)?;
     let written = file
         .write_all(contents.as_bytes())
         .and_then(|()| file.write_all(b"\n"))
         .and_then(|()| file.sync_all());
     drop(file);
-    if let Err(e) = written.and_then(|()| fs::rename(&tmp, path)) {
-        let _ = fs::remove_file(&tmp);
+    if let Err(e) = written.and_then(|()| rename_at(&dir, &tmp, &dest)) {
+        let _ = unlink_at(&dir, &tmp);
         return Err(e);
     }
 
     // Make the new directory entry itself survive a crash.
-    if let Ok(dir) = fs::File::open(parent) {
-        let _ = dir.sync_all();
-    }
+    let _ = dir.sync_all();
     Ok(())
 }
 
-fn create_exclusive_temp(parent: &Path, path: &Path) -> std::io::Result<(fs::File, PathBuf)> {
-    let name = path
+/// Opens `dir` refusing to traverse a final symlink, then confirms the opened
+/// directory belongs to this user. The first check stops the config directory
+/// itself from being swapped for a link; the second stops a redirect through
+/// any earlier path component, which `O_NOFOLLOW` does not cover.
+fn open_dir(dir: &Path) -> std::io::Result<fs::File> {
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(dir)
+        .map_err(|e| match e.raw_os_error() {
+            Some(libc::ELOOP) | Some(libc::ENOTDIR) => Error::new(
+                ErrorKind::InvalidInput,
+                format!("{} is not a directory", dir.display()),
+            ),
+            _ => e,
+        })?;
+
+    let mut st = std::mem::MaybeUninit::<libc::stat>::uninit();
+    if unsafe { libc::fstat(file.as_raw_fd(), st.as_mut_ptr()) } != 0 {
+        return Err(Error::last_os_error());
+    }
+    let owner = unsafe { st.assume_init() }.st_uid;
+    if owner != unsafe { libc::geteuid() } {
+        return Err(Error::new(
+            ErrorKind::PermissionDenied,
+            format!("{} is not owned by this user", dir.display()),
+        ));
+    }
+    Ok(file)
+}
+
+fn create_temp(dir: &fs::File, path: &Path) -> std::io::Result<(fs::File, CString)> {
+    let base = path
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("omaportless");
     for _ in 0..16 {
-        let tmp = parent.join(format!(".{name}.{}.tmp", unique_token()));
-        match fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(FILE_MODE)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-            .open(&tmp)
-        {
-            Ok(file) => {
-                // mode() above is masked by umask; pin it down on the open fd.
-                file.set_permissions(fs::Permissions::from_mode(FILE_MODE))?;
-                return Ok((file, tmp));
-            }
-            Err(e) if e.kind() == ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(e),
+        let name = to_cstring(format!(".{base}.{}.tmp", unique_token()).as_bytes())?;
+        let fd = unsafe {
+            libc::openat(
+                dir.as_raw_fd(),
+                name.as_ptr(),
+                libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+                FILE_MODE as libc::c_uint,
+            )
+        };
+        if fd >= 0 {
+            let file = unsafe { fs::File::from_raw_fd(fd) };
+            // The mode passed to openat is masked by umask; pin it on the fd.
+            file.set_permissions(fs::Permissions::from_mode(FILE_MODE))?;
+            return Ok((file, name));
+        }
+        let e = Error::last_os_error();
+        if e.kind() != ErrorKind::AlreadyExists {
+            return Err(e);
         }
     }
-    Err(std::io::Error::new(
+    Err(Error::new(
         ErrorKind::AlreadyExists,
         "could not create a unique temporary file",
     ))
+}
+
+/// Returns the `S_IFMT` bits of `name` inside `dir`, or `None` when absent.
+/// The link itself is inspected, never its target.
+fn entry_mode(dir: &fs::File, name: &CString) -> std::io::Result<Option<u32>> {
+    let mut st = std::mem::MaybeUninit::<libc::stat>::uninit();
+    let rc = unsafe {
+        libc::fstatat(
+            dir.as_raw_fd(),
+            name.as_ptr(),
+            st.as_mut_ptr(),
+            libc::AT_SYMLINK_NOFOLLOW,
+        )
+    };
+    if rc != 0 {
+        let e = Error::last_os_error();
+        return if e.kind() == ErrorKind::NotFound {
+            Ok(None)
+        } else {
+            Err(e)
+        };
+    }
+    Ok(Some(unsafe { st.assume_init() }.st_mode & libc::S_IFMT))
+}
+
+fn rename_at(dir: &fs::File, from: &CString, to: &CString) -> std::io::Result<()> {
+    let fd = dir.as_raw_fd();
+    let rc = unsafe { libc::renameat(fd, from.as_ptr(), fd, to.as_ptr()) };
+    if rc != 0 {
+        return Err(Error::last_os_error());
+    }
+    Ok(())
+}
+
+fn unlink_at(dir: &fs::File, name: &CString) -> std::io::Result<()> {
+    let rc = unsafe { libc::unlinkat(dir.as_raw_fd(), name.as_ptr(), 0) };
+    if rc != 0 {
+        return Err(Error::last_os_error());
+    }
+    Ok(())
+}
+
+fn entry_name(path: &Path) -> std::io::Result<CString> {
+    let name = path.file_name().ok_or_else(|| {
+        Error::new(
+            ErrorKind::InvalidInput,
+            format!("{} has no file name", path.display()),
+        )
+    })?;
+    to_cstring(name.as_bytes())
+}
+
+fn to_cstring(bytes: &[u8]) -> std::io::Result<CString> {
+    CString::new(bytes).map_err(|_| {
+        Error::new(
+            ErrorKind::InvalidInput,
+            "file name contains an interior NUL byte",
+        )
+    })
 }
 
 fn unique_token() -> String {
@@ -278,6 +370,37 @@ mod tests {
 
         assert_eq!(fs::read_to_string(&victim).unwrap(), "keep me\n");
         assert!(fs::read_to_string(&path).unwrap().contains("listen_port"));
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn does_not_write_through_a_symlinked_config_directory() {
+        let dir = scratch_dir();
+        let elsewhere = dir.join("elsewhere");
+        fs::create_dir(&elsewhere).unwrap();
+        let config_dir = dir.join("omaportless");
+        symlink(&elsewhere, &config_dir).unwrap();
+
+        let err = atomic_write(&config_dir.join("config.json"), "{}").unwrap_err();
+
+        assert_eq!(err.kind(), ErrorKind::InvalidInput);
+        assert_eq!(fs::read_dir(&elsewhere).unwrap().count(), 0);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn creates_a_missing_config_directory() {
+        let dir = scratch_dir();
+        let path = dir.join("nested/omaportless/config.json");
+        atomic_write(&path, "{}").unwrap();
+
+        assert_eq!(fs::read_to_string(&path).unwrap(), "{}\n");
+        let mode = fs::metadata(path.parent().unwrap())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, DIR_MODE);
         fs::remove_dir_all(&dir).unwrap();
     }
 
