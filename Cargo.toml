@@ -1,6 +1,6 @@
 [package]
 name = "omaportless"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 license = "MIT"
 description = "Named .localhost URLs for local dev servers"
