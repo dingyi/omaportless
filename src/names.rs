@@ -64,6 +64,13 @@ pub fn is_index_host(host: &str) -> bool {
     )
 }
 
+/// `name.localhost` is omaportless's namespace. Unknown names here must not
+/// fall through to the stolen :80 upstream, or the user sees that server's 404.
+pub fn is_app_host(host: &str) -> bool {
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    host.ends_with(".localhost") && host != "localhost"
+}
+
 pub fn service_url(hostname: &str, proxy_port: u16) -> String {
     if proxy_port == 0 || proxy_port == 80 {
         format!("http://{hostname}.{TLD}")
@@ -194,6 +201,17 @@ mod tests {
         assert!(is_index_host("127.0.0.1"));
         assert!(is_index_host("::1"));
         assert!(!is_index_host("dashboard.localhost"));
+    }
+
+    #[test]
+    fn app_hosts_are_the_localhost_namespace() {
+        assert!(is_app_host("whatships.localhost"));
+        assert!(is_app_host("whatships.localhost."));
+        assert!(is_app_host("api.myapp.localhost"));
+        assert!(!is_app_host("localhost"));
+        assert!(!is_app_host("127.0.0.1"));
+        assert!(!is_app_host("once.example"));
+        assert!(!is_app_host(""));
     }
 
     #[test]

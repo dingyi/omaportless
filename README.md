@@ -29,7 +29,7 @@ omarchy plugin add https://github.com/dingyi/omaportless.git --enable
 
 Keys in the panel: `t` proxy, `o` index, `r` refresh.
 
-If something else already owns port 80, omaportless listens on 7777 and, with one polkit prompt, installs a loopback-only nftables redirect so `http://name.localhost` still works with no port. Unknown hosts are passed through to `127.0.0.2:80`.
+If something else already owns port 80, omaportless listens on 7777 and, with one polkit prompt, installs a loopback-only nftables redirect so `http://name.localhost` still works with no port. Unknown hosts that are not `*.localhost` are passed through to `127.0.0.2:80`. A missing `name.localhost` app gets omaportless's own 404, not the other server's.
 
 ```sh
 ~/.config/omarchy/plugins/dingyi.omaportless/omaportless enable-port80

@@ -12,7 +12,7 @@ use crate::http::{
     hop_count, http_response, index_page, is_control_request, not_found_page, parse_host_header,
     request_path, should_index, with_hop, MAX_HOPS,
 };
-use crate::names::{assign_names, newest_for_hostname, short_name, NamedService};
+use crate::names::{assign_names, is_app_host, newest_for_hostname, short_name, NamedService};
 use crate::scan::scan_listeners;
 use crate::status::probe_public_port;
 
@@ -132,25 +132,27 @@ async fn handle_client(mut client: TcpStream, core: Arc<RwLock<ProxyCore>>) {
         return;
     }
 
-    let (addrs, payload) = if let Some(target) = snapshot.2 {
-        (
+    let (addrs, payload) = match (&snapshot.2, snapshot.3.as_ref()) {
+        (Some(target), _) => (
             backend_addrs(&target.listener.bind, target.listener.port),
             buf,
-        )
-    } else if let Some(up) = snapshot.3 {
-        (vec![format_addr(&up.0, up.1)], with_hop(&buf, hops + 1))
-    } else {
-        reply(
-            &mut client,
-            http_response(
-                404,
-                "Not Found",
-                &not_found_page(&host, &snapshot.1, snapshot.0),
-                "text/plain; charset=utf-8",
-            ),
-        )
-        .await;
-        return;
+        ),
+        (None, Some(up)) if pass_to_upstream(&host) => {
+            (vec![format_addr(&up.0, up.1)], with_hop(&buf, hops + 1))
+        }
+        _ => {
+            reply(
+                &mut client,
+                http_response(
+                    404,
+                    "Not Found",
+                    &not_found_page(&host, &snapshot.1, snapshot.0),
+                    "text/plain; charset=utf-8",
+                ),
+            )
+            .await;
+            return;
+        }
     };
 
     match connect_backend(&addrs).await {
@@ -313,9 +315,13 @@ pub async fn run_daemon() -> i32 {
     0
 }
 
+fn pass_to_upstream(host: &str) -> bool {
+    !is_app_host(host)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::backend_addrs;
+    use super::{backend_addrs, pass_to_upstream};
 
     #[test]
     fn ipv6_only_prefers_loopback_v6() {
@@ -331,5 +337,14 @@ mod tests {
             backend_addrs("127.0.0.1", 4321),
             vec!["127.0.0.1:4321".to_string(), "[::1]:4321".to_string()]
         );
+    }
+
+    #[test]
+    fn named_localhost_does_not_fall_through_to_upstream() {
+        assert!(!pass_to_upstream("whatships.localhost"));
+        assert!(!pass_to_upstream("api.myapp.localhost"));
+        assert!(pass_to_upstream("once.local"));
+        assert!(pass_to_upstream("example.com"));
+        assert!(pass_to_upstream("127.0.0.2"));
     }
 }
