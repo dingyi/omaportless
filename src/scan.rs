@@ -8,17 +8,27 @@ const SKIP_COMM: &[&str] = &[
     "apache2",
     "avahi-daemon",
     "caddy",
+    "chrome",
+    "chromium",
     "clash-verge",
     "cupsd",
     "dropbox",
+    "firefox",
     "httpd",
     "moshi",
     "moshi-hook",
+    "msedge",
     "nginx",
     "sshd",
     "systemd",
     "systemd-resolved",
 ];
+
+/// Browsers listen on an ephemeral DevTools port and inherit the project
+/// directory they were launched from. That port is not the dev server.
+pub fn ignored_comm(comm: &str) -> bool {
+    SKIP_COMM.contains(&comm)
+}
 
 #[derive(Clone, Debug)]
 pub struct Listener {
@@ -194,7 +204,7 @@ pub fn scan_listeners(skip_ports: &[u16]) -> Vec<Listener> {
                 }
             }
             let comm = proc_field(pid, "comm");
-            if SKIP_COMM.contains(&comm.as_str()) {
+            if ignored_comm(&comm) {
                 continue;
             }
             if found.get(&port).map(|e| e.pid) == Some(pid) {
@@ -228,5 +238,15 @@ mod tests {
         let (ip, port) = parse_ipv4_port("0100007F:0BB8").unwrap();
         assert_eq!(ip, "127.0.0.1");
         assert_eq!(port, 3000);
+    }
+
+    #[test]
+    fn browsers_are_not_dev_servers() {
+        assert!(ignored_comm("chrome"));
+        assert!(ignored_comm("chromium"));
+        assert!(ignored_comm("firefox"));
+        assert!(ignored_comm("msedge"));
+        assert!(!ignored_comm("node"));
+        assert!(!ignored_comm("node-MainThread"));
     }
 }
